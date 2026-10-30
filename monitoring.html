@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Fan & Alarm Monitoring</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex items-center justify-center p-4">
+
+    <div class="max-w-2xl w-full bg-slate-800 rounded-xl shadow-xl p-6 border border-slate-700">
+        <h1 class="text-xl font-bold text-center text-cyan-400 mb-1">Smart Fan & Alarm Dashboard</h1>
+        <p class="text-xs text-center text-slate-400 mb-4">Samsung Innovation Campus Batch 8</p>
+
+        <div id="status-koneksi" class="mb-4 p-2 rounded text-center text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            Menghubungkan ke broker...
+        </div>
+
+        <!-- Live Metrics -->
+        <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="bg-slate-700/40 p-3 rounded-lg border border-slate-600/50 text-center">
+                <span class="text-[11px] text-slate-400 block mb-1">Suhu Saat Ini</span>
+                <span id="txt-temp" class="text-2xl font-bold text-orange-400">--</span>
+                <span class="text-sm text-orange-400">°C</span>
+            </div>
+            <div class="bg-slate-700/40 p-3 rounded-lg border border-slate-600/50 text-center">
+                <span class="text-[11px] text-slate-400 block mb-1">Kelembapan</span>
+                <span id="txt-humi" class="text-2xl font-bold text-blue-400">--</span>
+                <span class="text-sm text-blue-400">%</span>
+            </div>
+        </div>
+
+        <!-- Statistik -->
+        <div class="grid grid-cols-3 gap-2 mb-3">
+            <div class="bg-slate-900/40 p-2 rounded border border-slate-700 text-center">
+                <span class="text-[10px] text-slate-400 block">Max Suhu</span>
+                <span id="stat-max" class="text-sm font-semibold text-red-400">-- °C</span>
+            </div>
+            <div class="bg-slate-900/40 p-2 rounded border border-slate-700 text-center">
+                <span class="text-[10px] text-slate-400 block">Min Suhu</span>
+                <span id="stat-min" class="text-sm font-semibold text-cyan-400">-- °C</span>
+            </div>
+            <div class="bg-slate-900/40 p-2 rounded border border-slate-700 text-center">
+                <span class="text-[10px] text-slate-400 block">Rata-rata</span>
+                <span id="stat-avg" class="text-sm font-semibold text-amber-400">-- °C</span>
+            </div>
+        </div>
+
+        <!-- Status Indikator -->
+        <div class="grid grid-cols-2 gap-3 mb-4">
+            <div class="bg-slate-700/40 p-3 rounded-lg border border-slate-600/50 flex items-center justify-between">
+                <span class="text-xs text-slate-300">Kipas (Servo):</span>
+                <span id="badge-fan" class="px-2.5 py-0.5 rounded text-xs font-bold bg-slate-600 text-slate-300">OFF</span>
+            </div>
+            <div class="bg-slate-700/40 p-3 rounded-lg border border-slate-600/50 flex items-center justify-between">
+                <span class="text-xs text-slate-300">Alarm Buzzer:</span>
+                <span id="badge-alarm" class="px-2.5 py-0.5 rounded text-xs font-bold bg-slate-600 text-slate-300">OFF</span>
+            </div>
+        </div>
+
+        <!-- Grafik -->
+        <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+            <div class="relative h-40 w-full">
+                <canvas id="chartTemp"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('chartTemp').getContext('2d');
+        const chartTemp = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Suhu (°C)',
+                    data: [],
+                    borderColor: '#fb923c',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { color: '#94a3b8', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.03)' } },
+                    y: { suggestedMin: 20, suggestedMax: 40, ticks: { color: '#94a3b8', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.03)' } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        let dataSuhuArray = [];
+
+        const client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "WebClient_" + Math.random().toString(16).substring(2, 6));
+
+        client.onConnectionLost = (response) => {
+            if (response.errorCode !== 0) {
+                document.getElementById("status-koneksi").className = "mb-4 p-2 rounded text-center text-xs font-medium bg-red-500/10 text-red-300 border border-red-500/20";
+                document.getElementById("status-koneksi").innerText = "Koneksi terputus!";
+            }
+        };
+
+        client.onMessageArrived = (message) => {
+            try {
+                let data = JSON.parse(message.payloadString);
+                
+                document.getElementById("txt-temp").innerText = data.temp.toFixed(1);
+                document.getElementById("txt-humi").innerText = data.humi.toFixed(1);
+
+                // Hitung statistik sederhana
+                dataSuhuArray.push(data.temp);
+                let max = Math.max(...dataSuhuArray);
+                let min = Math.min(...dataSuhuArray);
+                let avg = dataSuhuArray.reduce((a, b) => a + b, 0) / dataSuhuArray.length;
+
+                document.getElementById("stat-max").innerText = max.toFixed(1) + " °C";
+                document.getElementById("stat-min").innerText = min.toFixed(1) + " °C";
+                document.getElementById("stat-avg").innerText = avg.toFixed(1) + " °C";
+
+                // Update badge kipas
+                let fanBadge = document.getElementById("badge-fan");
+                if (data.fan === "ON") {
+                    fanBadge.innerText = "ON";
+                    fanBadge.className = "px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-600 text-white";
+                } else {
+                    fanBadge.innerText = "OFF";
+                    fanBadge.className = "px-2.5 py-0.5 rounded text-xs font-bold bg-slate-600 text-slate-300";
+                }
+
+                // Update badge alarm
+                let alarmBadge = document.getElementById("badge-alarm");
+                if (data.alarm === "ON") {
+                    alarmBadge.innerText = "ON";
+                    alarmBadge.className = "px-2.5 py-0.5 rounded text-xs font-bold bg-red-600 text-white animate-pulse";
+                } else {
+                    alarmBadge.innerText = "OFF";
+                    alarmBadge.className = "px-2.5 py-0.5 rounded text-xs font-bold bg-slate-600 text-slate-300";
+                }
+
+                // Update grafik
+                let timeStr = new Date().toLocaleTimeString();
+                if (chartTemp.data.labels.length >= 10) {
+                    chartTemp.data.labels.shift();
+                    chartTemp.data.datasets[0].data.shift();
+                }
+                chartTemp.data.labels.push(timeStr);
+                chartTemp.data.datasets[0].data.push(data.temp);
+                chartTemp.update();
+            } catch (e) {
+                console.error("Gagal parsing data JSON");
+            }
+        };
+
+        client.connect({
+            onSuccess: () => {
+                let statusEl = document.getElementById("status-koneksi");
+                statusEl.className = "mb-4 p-2 rounded text-center text-xs font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20";
+                statusEl.innerText = "Terhubung ke MQTT Broker";
+                client.subscribe("sic8/iot/temperature_monitoring");
+            },
+            onFailure: () => {
+                let statusEl = document.getElementById("status-koneksi");
+                statusEl.className = "mb-4 p-2 rounded text-center text-xs font-medium bg-red-500/10 text-red-300 border border-red-500/20";
+                statusEl.innerText = "Gagal terhubung ke broker";
+            },
+            useSSL: false
+        });
+    </script>
+</body>
+</html>
